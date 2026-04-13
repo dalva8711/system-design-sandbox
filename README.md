@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# System design sandbox
 
-## Getting Started
+An interactive browser app for sketching simple distributed systems and watching **illustrative** traffic flow through them. Drag building blocks onto a canvas, connect them with edges, tune capacities and load, then run a lightweight simulation to see throughput, drops, latency-style hints, utilization, and rough “cost” numbers.
 
-First, run the development server:
+**Try it in the browser (no install):** [https://system-design-sandbox-three.vercel.app/](https://system-design-sandbox-three.vercel.app/)
+
+This is a **teaching toy**, not a production capacity planner or billing estimate.
+
+## What you can do
+
+- **Build a diagram** using a palette of common roles: client, load balancer, API, cache, message queue, database, CDN, and object storage.
+- **Connect nodes** by dragging from one handle to another to define how traffic can move.
+- **Run or step the simulation** with configurable tick interval and global offered load (RPS). Traffic is modeled as entering through **client** nodes and propagating along edges, subject to each component’s capacity.
+- **Inspect and edit** a selected node or edge in the side panel (simulation-related fields appear when something is selected).
+- **Persist work locally**: the diagram autosaves in `localStorage` for this browser.
+- **Export and import JSON** to share diagrams or keep backups.
+- **Load a sample** diagram or **clear the canvas** from the header.
+- **Delete** selected nodes or edges with Backspace/Delete, or drag a node onto the on-canvas trash target.
+- Use the **mini map** and **fit view** for navigation on larger diagrams.
+
+## Tech stack
+
+- [Next.js](https://nextjs.org/) (App Router)
+- [React](https://react.dev/)
+- [@xyflow/react](https://reactflow.dev/) (React Flow) for the canvas
+- [Zustand](https://github.com/pmndrs/zustand) for application state
+- [Tailwind CSS](https://tailwindcss.com/) for styling
+
+## Local development
+
+Prerequisites: [Node.js](https://nodejs.org/) (version compatible with the project’s `package.json`).
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). The main UI lives in `components/design/`; simulation logic is under `lib/sim/`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm start
+```
 
-## Learn More
+## Lint
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run lint
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploy
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The live demo is hosted on [Vercel](https://vercel.com/). You can deploy your own fork with the [Next.js deployment guide](https://nextjs.org/docs/app/building-your-application/deploying).
