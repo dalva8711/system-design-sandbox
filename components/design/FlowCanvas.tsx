@@ -24,6 +24,7 @@ import {
 } from "@/components/design/edges/TrafficEdge";
 import { SystemNode } from "@/components/design/nodes/SystemNode";
 import {
+  coerceNodeData,
   normalizeEdgeData,
   type DesignNode,
   type NodeKind,
@@ -51,6 +52,20 @@ const KINDS = new Set<NodeKind>([
 
 function isNodeKind(value: string): value is NodeKind {
   return KINDS.has(value as NodeKind);
+}
+
+function routeWeightAppliesForSource(
+  nodeList: DesignNode[],
+  sourceId: string,
+): boolean {
+  const src = nodeList.find((n) => n.id === sourceId);
+  if (!src) return false;
+  const d = coerceNodeData(src.data);
+  return (
+    d.kind === "lb" &&
+    d.behavior.behaviorKind === "lb" &&
+    d.behavior.algorithm === "weighted"
+  );
 }
 
 function pointInRect(
@@ -188,6 +203,33 @@ export function FlowCanvas() {
   const trashRef = useRef<HTMLDivElement>(null);
   const [trashHot, setTrashHot] = useState(false);
 
+  const [showMiniMap, setShowMiniMap] = useState(false);
+  const miniMapHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearMiniMapHideTimer = useCallback(() => {
+    if (miniMapHideTimerRef.current !== null) {
+      clearTimeout(miniMapHideTimerRef.current);
+      miniMapHideTimerRef.current = null;
+    }
+  }, []);
+
+  const onViewportMoveStart = useCallback(() => {
+    clearMiniMapHideTimer();
+    setShowMiniMap(true);
+  }, [clearMiniMapHideTimer]);
+
+  const onViewportMoveEnd = useCallback(() => {
+    clearMiniMapHideTimer();
+    miniMapHideTimerRef.current = setTimeout(() => {
+      miniMapHideTimerRef.current = null;
+      setShowMiniMap(false);
+    }, 200);
+  }, [clearMiniMapHideTimer]);
+
+  useEffect(() => {
+    return () => clearMiniMapHideTimer();
+  }, [clearMiniMapHideTimer]);
+
   const onNodeDrag = useCallback((event: ReactMouseEvent) => {
     setTrashHot(pointInRect(event.clientX, event.clientY, trashRef.current));
   }, []);
@@ -241,6 +283,7 @@ export function FlowCanvas() {
         type: "traffic" as const,
         data: {
           ...normalizeEdgeData(e.data),
+          routeWeightApplies: routeWeightAppliesForSource(nodes, e.source),
           flowRps: 0,
           flowNorm: 0,
           simActive: false,
@@ -258,12 +301,13 @@ export function FlowCanvas() {
       type: "traffic" as const,
       data: {
         ...normalizeEdgeData(e.data),
+        routeWeightApplies: routeWeightAppliesForSource(nodes, e.source),
         flowRps: flows[e.id] ?? 0,
         flowNorm: (flows[e.id] ?? 0) / denom,
         simActive: true,
       },
     }));
-  }, [edges, simRunning, metrics]);
+  }, [edges, nodes, simRunning, metrics]);
 
   const flowRef = useRef<FlowInstance | null>(null);
 
@@ -323,13 +367,17 @@ export function FlowCanvas() {
         deleteKeyCode={["Backspace", "Delete"]}
         fitView
         proOptions={{ hideAttribution: true }}
+        onMoveStart={onViewportMoveStart}
+        onMoveEnd={onViewportMoveEnd}
       >
         <Background gap={18} size={1} variant={BackgroundVariant.Dots} />
-        <MiniMap
-          pannable
-          zoomable
-          className="!rounded-md !border !border-black/10 !bg-[var(--background)] dark:!border-white/10"
-        />
+        {showMiniMap ? (
+          <MiniMap
+            pannable
+            zoomable
+            className="!rounded-md !border !border-black/10 !bg-[var(--background)] dark:!border-white/10"
+          />
+        ) : null}
         <Controls className="!shadow-md" />
         <TrashDropTarget trashRef={trashRef} hot={trashHot} />
         <SelectionBridge />
