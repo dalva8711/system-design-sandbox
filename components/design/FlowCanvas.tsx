@@ -203,6 +203,33 @@ export function FlowCanvas() {
   const trashRef = useRef<HTMLDivElement>(null);
   const [trashHot, setTrashHot] = useState(false);
 
+  const [showMiniMap, setShowMiniMap] = useState(false);
+  const miniMapHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearMiniMapHideTimer = useCallback(() => {
+    if (miniMapHideTimerRef.current !== null) {
+      clearTimeout(miniMapHideTimerRef.current);
+      miniMapHideTimerRef.current = null;
+    }
+  }, []);
+
+  const onViewportMoveStart = useCallback(() => {
+    clearMiniMapHideTimer();
+    setShowMiniMap(true);
+  }, [clearMiniMapHideTimer]);
+
+  const onViewportMoveEnd = useCallback(() => {
+    clearMiniMapHideTimer();
+    miniMapHideTimerRef.current = setTimeout(() => {
+      miniMapHideTimerRef.current = null;
+      setShowMiniMap(false);
+    }, 200);
+  }, [clearMiniMapHideTimer]);
+
+  useEffect(() => {
+    return () => clearMiniMapHideTimer();
+  }, [clearMiniMapHideTimer]);
+
   const onNodeDrag = useCallback((event: ReactMouseEvent) => {
     setTrashHot(pointInRect(event.clientX, event.clientY, trashRef.current));
   }, []);
@@ -340,13 +367,17 @@ export function FlowCanvas() {
         deleteKeyCode={["Backspace", "Delete"]}
         fitView
         proOptions={{ hideAttribution: true }}
+        onMoveStart={onViewportMoveStart}
+        onMoveEnd={onViewportMoveEnd}
       >
         <Background gap={18} size={1} variant={BackgroundVariant.Dots} />
-        <MiniMap
-          pannable
-          zoomable
-          className="!rounded-md !border !border-black/10 !bg-[var(--background)] dark:!border-white/10"
-        />
+        {showMiniMap ? (
+          <MiniMap
+            pannable
+            zoomable
+            className="!rounded-md !border !border-black/10 !bg-[var(--background)] dark:!border-white/10"
+          />
+        ) : null}
         <Controls className="!shadow-md" />
         <TrashDropTarget trashRef={trashRef} hot={trashHot} />
         <SelectionBridge />
