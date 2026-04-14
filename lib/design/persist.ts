@@ -1,7 +1,10 @@
 import type { PersistedState } from "./types";
-import { PERSISTENCE_VERSION, STORAGE_KEY } from "./types";
+import { normalizePersistedState, STORAGE_KEY } from "./types";
 
 const DEBOUNCE_MS = 400;
+
+/** Previous autosave key (v1); migrated on read. */
+const LEGACY_STORAGE_KEY = "system-design-sandbox-v1";
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -22,15 +25,12 @@ export function scheduleAutosave(getSnapshot: () => PersistedState) {
 export function loadPersisted(): PersistedState | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(STORAGE_KEY) ??
+      window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedState;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (parsed.version !== PERSISTENCE_VERSION) return null;
-    if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
-      return null;
-    }
-    return parsed;
+    const parsed = JSON.parse(raw) as unknown;
+    return normalizePersistedState(parsed);
   } catch {
     return null;
   }
