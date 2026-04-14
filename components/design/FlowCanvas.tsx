@@ -24,6 +24,7 @@ import {
 } from "@/components/design/edges/TrafficEdge";
 import { SystemNode } from "@/components/design/nodes/SystemNode";
 import {
+  coerceNodeData,
   normalizeEdgeData,
   type DesignNode,
   type NodeKind,
@@ -51,6 +52,20 @@ const KINDS = new Set<NodeKind>([
 
 function isNodeKind(value: string): value is NodeKind {
   return KINDS.has(value as NodeKind);
+}
+
+function routeWeightAppliesForSource(
+  nodeList: DesignNode[],
+  sourceId: string,
+): boolean {
+  const src = nodeList.find((n) => n.id === sourceId);
+  if (!src) return false;
+  const d = coerceNodeData(src.data);
+  return (
+    d.kind === "lb" &&
+    d.behavior.behaviorKind === "lb" &&
+    d.behavior.algorithm === "weighted"
+  );
 }
 
 function pointInRect(
@@ -241,6 +256,7 @@ export function FlowCanvas() {
         type: "traffic" as const,
         data: {
           ...normalizeEdgeData(e.data),
+          routeWeightApplies: routeWeightAppliesForSource(nodes, e.source),
           flowRps: 0,
           flowNorm: 0,
           simActive: false,
@@ -258,12 +274,13 @@ export function FlowCanvas() {
       type: "traffic" as const,
       data: {
         ...normalizeEdgeData(e.data),
+        routeWeightApplies: routeWeightAppliesForSource(nodes, e.source),
         flowRps: flows[e.id] ?? 0,
         flowNorm: (flows[e.id] ?? 0) / denom,
         simActive: true,
       },
     }));
-  }, [edges, simRunning, metrics]);
+  }, [edges, nodes, simRunning, metrics]);
 
   const flowRef = useRef<FlowInstance | null>(null);
 
