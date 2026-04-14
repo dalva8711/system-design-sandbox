@@ -1,8 +1,15 @@
 "use client";
 
 import { useMemo } from "react";
+import { NodeBehaviorFields } from "@/components/design/inspector/NodeBehaviorFields";
+import { NumericDraftInput } from "@/components/design/inspector/NumericDraftInput";
 import { useDesignStore } from "@/lib/design/store";
-import type { NodeKind, NodeStatus } from "@/lib/design/types";
+import {
+  coerceNodeData,
+  type NodeBehavior,
+  type NodeKind,
+  type NodeStatus,
+} from "@/lib/design/types";
 
 export function InspectorPanel() {
   const nodes = useDesignStore((s) => s.nodes);
@@ -23,7 +30,7 @@ export function InspectorPanel() {
   );
 
   if (selectedNode) {
-    const d = selectedNode.data;
+    const d = coerceNodeData(selectedNode.data);
     const nid = selectedNode.id;
     const lastUtil = metrics.nodeUtilization[nid] ?? 0;
     const lastServed = metrics.nodeServedRps[nid] ?? 0;
@@ -55,16 +62,17 @@ export function InspectorPanel() {
         </label>
         <label className="block text-xs font-medium">
           Capacity (rps)
-          <input
-            type="number"
-            min={0}
-            className="mt-1 w-full rounded border border-black/15 bg-[var(--background)] px-2 py-1.5 text-sm dark:border-white/15"
+          <NumericDraftInput
+            scopeKey={`${nid}-capacity`}
             value={d.capacity}
-            onChange={(e) =>
+            onCommit={(n) =>
               updateNodeData(selectedNode.id, {
-                capacity: Number(e.target.value),
+                capacity: Math.max(0, n),
               })
             }
+            inputMode="numeric"
+            min={0}
+            className="mt-1 w-full rounded border border-black/15 bg-[var(--background)] px-2 py-1.5 text-sm tabular-nums dark:border-white/15"
           />
         </label>
         <fieldset className="space-y-1 text-xs">
@@ -136,6 +144,14 @@ export function InspectorPanel() {
             ))}
           </select>
         </label>
+        <NodeBehaviorFields
+          inputScope={nid}
+          kind={d.kind}
+          behavior={d.behavior}
+          onBehaviorChange={(next: NodeBehavior) =>
+            updateNodeData(selectedNode.id, { behavior: next })
+          }
+        />
         {hasTickData ? (
           <div className="rounded-md border border-black/10 bg-black/[0.03] p-2 text-[11px] dark:border-white/10 dark:bg-white/[0.04]">
             <p className="mb-1 font-medium text-black/60 dark:text-white/50">
@@ -150,6 +166,19 @@ export function InspectorPanel() {
               <dd>{lastDropped.toFixed(0)} rps</dd>
               <dt className="text-black/50 dark:text-white/45">~$/hr</dt>
               <dd>${lastCost.toFixed(2)}</dd>
+              {d.kind === "queue" ? (
+                <>
+                  <dt className="text-black/50 dark:text-white/45">
+                    Queue depth
+                  </dt>
+                  <dd>
+                    {(metrics.queueDepth[nid] ?? 0).toLocaleString(undefined, {
+                      maximumFractionDigits: 0,
+                    })}{" "}
+                    req
+                  </dd>
+                </>
+              ) : null}
             </dl>
           </div>
         ) : null}
@@ -159,6 +188,14 @@ export function InspectorPanel() {
 
   if (selectedEdge) {
     const lat = selectedEdge.data?.latencyMs ?? 10;
+    const rw = selectedEdge.data?.routeWeight ?? 1;
+    const src = nodes.find((n) => n.id === selectedEdge.source);
+    const srcData = src ? coerceNodeData(src.data) : null;
+    const showWeightHint =
+      srcData?.kind === "lb" &&
+      srcData.behavior.behaviorKind === "lb" &&
+      srcData.behavior.algorithm === "weighted";
+
     return (
       <section className="space-y-3 rounded-lg border border-black/10 bg-black/[0.02] p-3 dark:border-white/10 dark:bg-white/[0.03]">
         <header>
@@ -169,17 +206,44 @@ export function InspectorPanel() {
         </header>
         <label className="block text-xs font-medium">
           Latency (ms)
-          <input
-            type="number"
-            min={0}
-            className="mt-1 w-full rounded border border-black/15 bg-[var(--background)] px-2 py-1.5 text-sm dark:border-white/15"
+          <NumericDraftInput
+            scopeKey={`${selectedEdge.id}-latencyMs`}
             value={lat}
-            onChange={(e) =>
+            onCommit={(n) =>
               updateEdgeData(selectedEdge.id, {
-                latencyMs: Number(e.target.value),
+                latencyMs: Math.max(0, n),
               })
             }
+            inputMode="numeric"
+            min={0}
+            className="mt-1 w-full rounded border border-black/15 bg-[var(--background)] px-2 py-1.5 text-sm tabular-nums dark:border-white/15"
           />
+        </label>
+        <label className="block text-xs font-medium">
+          Route weight
+          <NumericDraftInput
+            scopeKey={`${selectedEdge.id}-routeWeight`}
+            value={rw}
+            onCommit={(n) =>
+              updateEdgeData(selectedEdge.id, {
+                routeWeight: Math.max(0.01, n),
+              })
+            }
+            inputMode="decimal"
+            min={0.01}
+            step={0.1}
+            className="mt-1 w-full rounded border border-black/15 bg-[var(--background)] px-2 py-1.5 text-sm tabular-nums dark:border-white/15"
+          />
+          {showWeightHint ? (
+            <span className="mt-0.5 block text-[10px] font-normal text-black/45 dark:text-white/40">
+              Source is a weighted load balancer: relative weights set how much
+              traffic each outgoing link receives.
+            </span>
+          ) : (
+            <span className="mt-0.5 block text-[10px] font-normal text-black/45 dark:text-white/40">
+              Used when the source node is an LB with the weighted algorithm.
+            </span>
+          )}
         </label>
       </section>
     );

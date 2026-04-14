@@ -23,7 +23,11 @@ import {
   type TrafficEdgeModel,
 } from "@/components/design/edges/TrafficEdge";
 import { SystemNode } from "@/components/design/nodes/SystemNode";
-import type { DesignNode, NodeKind } from "@/lib/design/types";
+import {
+  normalizeEdgeData,
+  type DesignNode,
+  type NodeKind,
+} from "@/lib/design/types";
 import { useDesignStore } from "@/lib/design/store";
 
 const nodeTypes = {
@@ -129,8 +133,19 @@ function TrashIcon({ className }: { className?: string }) {
 
 function CanvasToolbar() {
   const rf = useReactFlow();
+  const nodeCount = useDesignStore((s) => s.nodes.length);
+  const autoLayoutCanvas = useDesignStore((s) => s.autoLayoutCanvas);
   return (
     <Panel position="top-right" className="flex gap-2">
+      <button
+        type="button"
+        onClick={() => autoLayoutCanvas()}
+        disabled={nodeCount === 0}
+        className="rounded-md border border-black/15 bg-[var(--background)] px-2 py-1 text-xs font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/15"
+        aria-label="Tidy layout: auto-arrange all nodes"
+      >
+        Tidy layout
+      </button>
       <button
         type="button"
         onClick={() => rf.fitView({ padding: 0.2 })}
@@ -225,7 +240,7 @@ export function FlowCanvas() {
         ...e,
         type: "traffic" as const,
         data: {
-          ...(e.data ?? { latencyMs: 10 }),
+          ...normalizeEdgeData(e.data),
           flowRps: 0,
           flowNorm: 0,
           simActive: false,
@@ -242,7 +257,7 @@ export function FlowCanvas() {
       ...e,
       type: "traffic" as const,
       data: {
-        ...(e.data ?? { latencyMs: 10 }),
+        ...normalizeEdgeData(e.data),
         flowRps: flows[e.id] ?? 0,
         flowNorm: (flows[e.id] ?? 0) / denom,
         simActive: true,
@@ -280,7 +295,7 @@ export function FlowCanvas() {
   const defaultEdgeOptions = useMemo(
     () => ({
       type: "traffic" as const,
-      data: { latencyMs: 10 },
+      data: { latencyMs: 10, routeWeight: 1 },
     }),
     [],
   );

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { NodeKind, PersistedState } from "@/lib/design/types";
-import { PERSISTENCE_VERSION } from "@/lib/design/types";
+import type { NodeKind } from "@/lib/design/types";
+import { normalizePersistedState } from "@/lib/design/types";
 import {
   requestAutosave,
   useDesignStore,
@@ -73,12 +73,13 @@ export function SimulationBlock() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const parsed = JSON.parse(String(reader.result)) as PersistedState;
-        if (parsed.version !== PERSISTENCE_VERSION) {
-          window.alert("Unsupported file version.");
+        const parsed = JSON.parse(String(reader.result)) as unknown;
+        const normalized = normalizePersistedState(parsed);
+        if (!normalized) {
+          window.alert("Unsupported or invalid diagram file.");
           return;
         }
-        hydrateFromImport(parsed);
+        hydrateFromImport(normalized);
         requestAutosave();
       } catch {
         window.alert("Could not read that JSON file.");

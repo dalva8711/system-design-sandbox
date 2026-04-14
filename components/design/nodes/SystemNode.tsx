@@ -2,7 +2,11 @@
 
 import { Handle, Position } from "@xyflow/react";
 import type { Node, NodeProps } from "@xyflow/react";
-import type { DesignNodeData, NodeKind } from "@/lib/design/types";
+import {
+  coerceNodeData,
+  type DesignNodeData,
+  type NodeKind,
+} from "@/lib/design/types";
 
 const accent: Record<NodeKind, string> = {
   client:
@@ -38,11 +42,53 @@ const statusPill: Record<
   },
 };
 
+function behaviorSummary(d: DesignNodeData): string {
+  const data = coerceNodeData(d);
+  const b = data.behavior;
+  switch (data.kind) {
+    case "client":
+      return b.behaviorKind === "client"
+        ? `weight ${b.trafficWeight} · burst ${(b.burstiness * 100).toFixed(0)}%`
+        : "";
+    case "lb":
+      return b.behaviorKind === "lb"
+        ? `${b.algorithm}${b.maxConcurrentRps != null ? ` · cap ${b.maxConcurrentRps} rps` : ""}`
+        : "";
+    case "api":
+      return b.behaviorKind === "api"
+        ? `parallelism ×${b.parallelism.toFixed(2)}`
+        : "";
+    case "db":
+      return b.behaviorKind === "db"
+        ? `cost ×${b.queryCost.toFixed(2)} · replicas ×${b.replicaCount.toFixed(2)}`
+        : "";
+    case "cache":
+      return b.behaviorKind === "cache"
+        ? `${(b.hitRate * 100).toFixed(0)}% cache hits`
+        : "";
+    case "queue":
+      return b.behaviorKind === "queue"
+        ? `enqueue ${Math.round(b.publishCapRps)} / dequeue ${Math.round(b.consumeCapRps)} rps`
+        : "";
+    case "cdn":
+      return b.behaviorKind === "cdn"
+        ? `${(b.edgeHitRate * 100).toFixed(0)}% edge hits · origin ×${b.originPullMultiplier.toFixed(2)}`
+        : "";
+    case "storage":
+      return b.behaviorKind === "storage"
+        ? `+${Math.round(b.latencyTaxMs)} ms path tax`
+        : "";
+    default:
+      return "";
+  }
+}
+
 export function SystemNode({
   data,
   selected,
 }: NodeProps<Node<DesignNodeData>>) {
   const pill = statusPill[data.status];
+  const summary = behaviorSummary(data);
   const statusClass =
     data.status === "down"
       ? "opacity-90 ring-2 ring-rose-500/55"
@@ -99,6 +145,11 @@ export function SystemNode({
       <div className="mt-1 text-[11px] opacity-65">
         {Math.round(data.capacity).toLocaleString()} rps capacity
       </div>
+      {summary ? (
+        <div className="mt-1 line-clamp-2 text-[10px] leading-snug opacity-55">
+          {summary}
+        </div>
+      ) : null}
       {simActive ? (
         <div className="mt-1.5 border-t border-black/10 pt-1.5 text-[10px] leading-snug dark:border-white/10">
           <div className="font-mono tabular-nums text-black/75 dark:text-white/70">
