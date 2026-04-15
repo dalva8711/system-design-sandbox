@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { ComponentPalette } from "@/components/design/ComponentPalette";
 import { FlowCanvas } from "@/components/design/FlowCanvas";
 import { InspectorPanel } from "@/components/design/InspectorPanel";
 import { SimulationBlock } from "@/components/design/SimulationBlock";
 import { loadPersisted } from "@/lib/design/persist";
+import { DESIGN_TEMPLATES } from "@/lib/design/templates";
 import {
   requestAutosave,
   useDesignStore,
@@ -19,8 +20,8 @@ export function DesignSandbox() {
   const tickMs = useDesignStore((s) => s.tickMs);
   const simRunning = useDesignStore((s) => s.simRunning);
   const stepSimulation = useDesignStore((s) => s.stepSimulation);
-  const loadSample = useDesignStore((s) => s.loadSample);
   const clearCanvas = useDesignStore((s) => s.clearCanvas);
+  const [templateSelect, setTemplateSelect] = useState("");
 
   useLayoutEffect(() => {
     const saved = loadPersisted();
@@ -60,14 +61,40 @@ export function DesignSandbox() {
               the canvas.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => loadSample()}
-              className="rounded-md border border-black/15 px-3 py-1.5 text-sm font-medium dark:border-white/15"
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="sr-only" htmlFor="design-templates">
+              Templates
+            </label>
+            <select
+              id="design-templates"
+              value={templateSelect}
+              onChange={(e) => {
+                const id = e.target.value;
+                if (!id) return;
+                if (
+                  nodes.length &&
+                  !window.confirm(
+                    "Replace the current diagram with this template?",
+                  )
+                ) {
+                  setTemplateSelect("");
+                  return;
+                }
+                const template = DESIGN_TEMPLATES.find((t) => t.id === id);
+                if (template) {
+                  useDesignStore.getState().hydrateFromImport(template.getState());
+                }
+                setTemplateSelect("");
+              }}
+              className="max-w-[220px] rounded-md border border-black/15 bg-[var(--background)] px-3 py-1.5 text-sm font-medium text-[var(--foreground)] dark:border-white/15"
             >
-              Load sample
-            </button>
+              <option value="">Load a template…</option>
+              {DESIGN_TEMPLATES.map((t) => (
+                <option key={t.id} value={t.id} title={t.shortDescription}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={() => {
