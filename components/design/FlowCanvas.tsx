@@ -146,12 +146,35 @@ function TrashIcon({ className }: { className?: string }) {
   );
 }
 
-function CanvasToolbar() {
+function CanvasToolbar({
+  canvasLocked,
+  onCanvasLockedChange,
+}: {
+  canvasLocked: boolean;
+  onCanvasLockedChange: (next: boolean) => void;
+}) {
   const rf = useReactFlow();
   const nodeCount = useDesignStore((s) => s.nodes.length);
   const autoLayoutCanvas = useDesignStore((s) => s.autoLayoutCanvas);
   return (
     <Panel position="top-right" className="flex gap-2">
+      <button
+        type="button"
+        aria-pressed={canvasLocked}
+        aria-label={
+          canvasLocked
+            ? "Unlock canvas"
+            : "Lock canvas: prevent moving nodes"
+        }
+        onClick={() => onCanvasLockedChange(!canvasLocked)}
+        className={`rounded-md border bg-[var(--background)] px-2 py-1 text-xs font-medium shadow-sm dark:border-white/15 ${
+          canvasLocked
+            ? "border-sky-500/60 ring-2 ring-sky-500/35 dark:border-sky-400/50"
+            : "border-black/15 dark:border-white/15"
+        }`}
+      >
+        {canvasLocked ? "Locked" : "Lock"}
+      </button>
       <button
         type="button"
         onClick={() => autoLayoutCanvas()}
@@ -202,6 +225,7 @@ export function FlowCanvas() {
 
   const trashRef = useRef<HTMLDivElement>(null);
   const [trashHot, setTrashHot] = useState(false);
+  const [canvasLocked, setCanvasLocked] = useState(false);
 
   const [showMiniMap, setShowMiniMap] = useState(false);
   const miniMapHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -355,7 +379,7 @@ export function FlowCanvas() {
         onInit={onInit}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        nodesDraggable
+        nodesDraggable={!canvasLocked} panOnDrag={!canvasLocked}
         nodesConnectable
         elementsSelectable
         onDragOver={onDragOver}
@@ -373,7 +397,7 @@ export function FlowCanvas() {
         <Background gap={18} size={1} variant={BackgroundVariant.Dots} />
         {showMiniMap ? (
           <MiniMap
-            pannable
+            pannable={!canvasLocked}
             zoomable
             className="!rounded-md !border !border-black/10 !bg-[var(--background)] dark:!border-white/10"
           />
@@ -381,7 +405,10 @@ export function FlowCanvas() {
         <Controls className="!shadow-md" />
         <TrashDropTarget trashRef={trashRef} hot={trashHot} />
         <SelectionBridge />
-        <CanvasToolbar />
+        <CanvasToolbar
+          canvasLocked={canvasLocked}
+          onCanvasLockedChange={setCanvasLocked}
+        />
         <FitViewListener />
       </ReactFlow>
     </div>
