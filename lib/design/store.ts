@@ -5,6 +5,7 @@ import {
   type Connection,
   type EdgeChange,
   type NodeChange,
+  type NodePositionChange,
 } from "@xyflow/react";
 import { create } from "zustand";
 import { simulateStep } from "@/lib/sim/engine";
@@ -28,6 +29,79 @@ import {
 import { layoutDesignGraph } from "./autoLayout";
 import { getSampleState } from "./sample";
 import { scheduleAutosave } from "./persist";
+
+const MAX_GRAPH_HISTORY = 75;
+const INSPECTOR_HISTORY_DEBOUNCE_MS = 280;
+
+type GraphSnapshot = { nodes: DesignNode[]; edges: DesignEdge[] };
+
+/** Nested undo/redo must not push onto the history stacks. */
+let graphHistoryDepth = 0;
+
+/**
+ * True while a pointer node-drag is in progress (after first `position`+`dragging:true`
+ * batch). Used so we record the pre-drag snapshot once, skip intermediate moves, and
+ * skip the final `dragging:false` batch (positions are already applied during drag).
+ */
+let nodePositionDragSession = false;
+
+let inspectorCoalesceKey: string | null = null;
+let inspectorCoalesceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleInspectorCoalesceEnd() {
+  if (inspectorCoalesceTimer) clearTimeout(inspectorCoalesceTimer);
+  inspectorCoalesceTimer = setTimeout(() => {
+    inspectorCoalesceTimer = null;
+    inspectorCoalesceKey = null;
+  }, INSPECTOR_HISTORY_DEBOUNCE_MS);
+}
+
+function cloneGraphSnapshot(nodes: DesignNode[], edges: DesignEdge[]): GraphSnapshot {
+  return structuredClone({ nodes, edges });
+}
+
+function resetNodePositionDragSession() {
+  nodePositionDragSession = false;
+}
+
+function shouldRecordNodesChange(changes: NodeChange[]): boolean {
+  if (changes.length === 0) return false;
+  if (changes.every((c) => c.type === "select" || c.type === "dimensions")) {
+    return false;
+  }
+
+  const onlyPosition = changes.every((c) => c.type === "position");
+  if (!onlyPosition) {
+    resetNodePositionDragSession();
+    return true;
+  }
+
+  const allDragging = changes.every(
+    (c) =>
+      c.type === "position" &&
+      (c as NodePositionChange).dragging === true,
+  );
+
+  if (allDragging) {
+    if (!nodePositionDragSession) {
+      nodePositionDragSession = true;
+      return true;
+    }
+    return false;
+  }
+
+  if (nodePositionDragSession) {
+    resetNodePositionDragSession();
+    return false;
+  }
+
+  return true;
+}
+
+function shouldRecordEdgesChange(changes: EdgeChange[]): boolean {
+  if (changes.length === 0) return false;
+  return !changes.every((c) => c.type === "select");
+}
 
 function defaultMetrics(): SimulationMetrics {
   return {
@@ -112,6 +186,18 @@ function createNode(kind: NodeKind, position: { x: number; y: number }): DesignN
 
 export type SelectionState = { nodeId: string | null; edgeId: string | null };
 
+function reconcileSelectionAfterGraphRestore(
+  nodes: DesignNode[],
+  edges: DesignEdge[],
+  sel: SelectionState,
+): SelectionState {
+  const nodeId =
+    sel.nodeId && nodes.some((n) => n.id === sel.nodeId) ? sel.nodeId : null;
+  const edgeId =
+    sel.edgeId && edges.some((e) => e.id === sel.edgeId) ? sel.edgeId : null;
+  return { nodeId, edgeId };
+}
+
 export type DesignStore = {
   nodes: DesignNode[];
   edges: DesignEdge[];
@@ -124,6 +210,12 @@ export type DesignStore = {
   selection: SelectionState;
   /** Incremented when the canvas should refit (sample load, import). */
   fitViewNonce: number;
+
+  graphPast: GraphSnapshot[];
+  graphFuture: GraphSnapshot[];
+
+  undoGraph: () => void;
+  redoGraph: () => void;
 
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
@@ -156,64 +248,193 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   selection: { nodeId: null, edgeId: null },
   fitViewNonce: 0,
 
-  onNodesChange: (changes) =>
+  graphPast: [],
+  graphFuture: [],
+
+  undoGraph: () => {
+    const s = get();
+    if (s.graphPast.length === 0) return;
+    resetNodePositionDragSession();
+    graphHistoryDepth++;
+    try {
+      const prev = s.graphPast[s.graphPast.length - 1];
+      const newPast = s.graphPast.slice(0, -1);
+      const currentSnap = cloneGraphSnapshot(s.nodes, s.edges);
+      const selection = reconcileSelectionAfterGraphRestore(
+        prev.nodes,
+        prev.edges,
+        s.selection,
+      );
+      set({
+        nodes: prev.nodes,
+        edges: prev.edges,
+        graphPast: newPast,
+        graphFuture: [currentSnap, ...s.graphFuture].slice(0, MAX_GRAPH_HISTORY),
+        selection,
+      });
+    } finally {
+      graphHistoryDepth--;
+    }
+  },
+
+  redoGraph: () => {
+    const s = get();
+    if (s.graphFuture.length === 0) return;
+    resetNodePositionDragSession();
+    graphHistoryDepth++;
+    try {
+      const [next, ...restFuture] = s.graphFuture;
+      const currentSnap = cloneGraphSnapshot(s.nodes, s.edges);
+      const selection = reconcileSelectionAfterGraphRestore(
+        next.nodes,
+        next.edges,
+        s.selection,
+      );
+      set({
+        nodes: next.nodes,
+        edges: next.edges,
+        graphPast: [...s.graphPast, currentSnap].slice(-MAX_GRAPH_HISTORY),
+        graphFuture: restFuture,
+        selection,
+      });
+    } finally {
+      graphHistoryDepth--;
+    }
+  },
+
+  onNodesChange: (changes) => {
+    const record =
+      graphHistoryDepth === 0 && shouldRecordNodesChange(changes);
     set((s) => ({
+      graphPast: record
+        ? [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+            -MAX_GRAPH_HISTORY,
+          )
+        : s.graphPast,
+      graphFuture: record ? [] : s.graphFuture,
       nodes: coerceNodes(
         withoutEphemeralNodeData(
           applyNodeChanges(changes, s.nodes) as DesignNode[],
         ),
       ),
-    })),
+    }));
+  },
 
-  onEdgesChange: (changes) =>
+  onEdgesChange: (changes) => {
+    const record =
+      graphHistoryDepth === 0 && shouldRecordEdgesChange(changes);
+    if (record) resetNodePositionDragSession();
     set((s) => ({
+      graphPast: record
+        ? [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+            -MAX_GRAPH_HISTORY,
+          )
+        : s.graphPast,
+      graphFuture: record ? [] : s.graphFuture,
       edges: applyEdgeChanges(changes, s.edges) as DesignEdge[],
-    })),
+    }));
+  },
 
   onConnect: (connection) =>
-    set((s) => ({
-      edges: addEdge(
-        {
-          ...connection,
-          data: { latencyMs: 10, routeWeight: 1 } satisfies DesignEdgeData,
-        },
-        s.edges,
-      ) as DesignEdge[],
-    })),
+    set((s) => {
+      const record = graphHistoryDepth === 0;
+      if (record) resetNodePositionDragSession();
+      return {
+        graphPast: record
+          ? [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+              -MAX_GRAPH_HISTORY,
+            )
+          : s.graphPast,
+        graphFuture: record ? [] : s.graphFuture,
+        edges: addEdge(
+          {
+            ...connection,
+            data: { latencyMs: 10, routeWeight: 1 } satisfies DesignEdgeData,
+          },
+          s.edges,
+        ) as DesignEdge[],
+      };
+    }),
 
   addNodeAt: (kind, position) =>
-    set((s) => ({
-      nodes: [...s.nodes, createNode(kind, position)],
-    })),
+    set((s) => {
+      const record = graphHistoryDepth === 0;
+      if (record) resetNodePositionDragSession();
+      return {
+        graphPast: record
+          ? [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+              -MAX_GRAPH_HISTORY,
+            )
+          : s.graphPast,
+        graphFuture: record ? [] : s.graphFuture,
+        nodes: [...s.nodes, createNode(kind, position)],
+      };
+    }),
 
   updateNodeData: (id, partial) =>
-    set((s) => ({
-      nodes: s.nodes.map((n) => {
-        if (n.id !== id) return n;
-        const merged: DesignNodeData = { ...n.data, ...partial };
-        if (partial.kind != null && partial.kind !== n.data.kind) {
-          merged.behavior = defaultNodeBehavior(partial.kind);
+    set((s) => {
+      let graphPast = s.graphPast;
+      let graphFuture = s.graphFuture;
+      if (graphHistoryDepth === 0) {
+        const key = `n:${id}`;
+        if (inspectorCoalesceKey !== key) {
+          resetNodePositionDragSession();
+          graphPast = [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+            -MAX_GRAPH_HISTORY,
+          );
+          graphFuture = [];
+          inspectorCoalesceKey = key;
         }
-        return { ...n, data: coerceNodeData(merged) };
-      }),
-    })),
+        scheduleInspectorCoalesceEnd();
+      }
+      return {
+        graphPast,
+        graphFuture,
+        nodes: s.nodes.map((n) => {
+          if (n.id !== id) return n;
+          const merged: DesignNodeData = { ...n.data, ...partial };
+          if (partial.kind != null && partial.kind !== n.data.kind) {
+            merged.behavior = defaultNodeBehavior(partial.kind);
+          }
+          return { ...n, data: coerceNodeData(merged) };
+        }),
+      };
+    }),
 
   updateEdgeData: (id, partial) =>
-    set((s) => ({
-      edges: s.edges.map((e) =>
-        e.id === id
-          ? {
-              ...e,
-              data: {
-                latencyMs: 10,
-                routeWeight: 1,
-                ...(e.data ?? {}),
-                ...partial,
-              } satisfies DesignEdgeData,
-            }
-          : e,
-      ),
-    })),
+    set((s) => {
+      let graphPast = s.graphPast;
+      let graphFuture = s.graphFuture;
+      if (graphHistoryDepth === 0) {
+        const key = `e:${id}`;
+        if (inspectorCoalesceKey !== key) {
+          resetNodePositionDragSession();
+          graphPast = [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+            -MAX_GRAPH_HISTORY,
+          );
+          graphFuture = [];
+          inspectorCoalesceKey = key;
+        }
+        scheduleInspectorCoalesceEnd();
+      }
+      return {
+        graphPast,
+        graphFuture,
+        edges: s.edges.map((e) =>
+          e.id === id
+            ? {
+                ...e,
+                data: {
+                  latencyMs: 10,
+                  routeWeight: 1,
+                  ...(e.data ?? {}),
+                  ...partial,
+                } satisfies DesignEdgeData,
+              }
+            : e,
+        ),
+      };
+    }),
 
   setSelection: (selection) => set({ selection }),
 
@@ -254,6 +475,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   hydrateFromImport: (data) => {
     const normalized = normalizePersistedState(data);
     if (!normalized) return;
+    resetNodePositionDragSession();
     set((s) => ({
       nodes: coerceNodes(normalized.nodes),
       edges: normalized.edges.map((e) => ({
@@ -266,6 +488,8 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       metrics: defaultMetrics(),
       transientSim: emptyTransientSimState(),
       fitViewNonce: s.fitViewNonce + 1,
+      graphPast: [],
+      graphFuture: [],
     }));
   },
 
@@ -286,7 +510,8 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     get().hydrateFromImport(getSampleState());
   },
 
-  clearCanvas: () =>
+  clearCanvas: () => {
+    resetNodePositionDragSession();
     set({
       nodes: [],
       edges: [],
@@ -294,16 +519,27 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
       metrics: defaultMetrics(),
       simRunning: false,
       transientSim: emptyTransientSimState(),
-    }),
+      graphPast: [],
+      graphFuture: [],
+    });
+  },
 
   autoLayoutCanvas: () =>
     set((s) => {
       if (s.nodes.length === 0) return {};
+      const record = graphHistoryDepth === 0;
+      if (record) resetNodePositionDragSession();
       const next = layoutDesignGraph(
         withoutEphemeralNodeData(s.nodes),
         s.edges,
       );
       return {
+        graphPast: record
+          ? [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+              -MAX_GRAPH_HISTORY,
+            )
+          : s.graphPast,
+        graphFuture: record ? [] : s.graphFuture,
         nodes: coerceNodes(next),
         fitViewNonce: s.fitViewNonce + 1,
       };
@@ -313,6 +549,8 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
     if (ids.length === 0) return;
     const idSet = new Set(ids);
     set((s) => {
+      const record = graphHistoryDepth === 0;
+      if (record) resetNodePositionDragSession();
       const nodes = s.nodes.filter((n) => !idSet.has(n.id));
       const edges = s.edges.filter(
         (e) => !idSet.has(e.source) && !idSet.has(e.target),
@@ -332,6 +570,12 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
         delete queueDepth[id];
       }
       return {
+        graphPast: record
+          ? [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+              -MAX_GRAPH_HISTORY,
+            )
+          : s.graphPast,
+        graphFuture: record ? [] : s.graphFuture,
         nodes,
         edges,
         selection: { nodeId, edgeId },
