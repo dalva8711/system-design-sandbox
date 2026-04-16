@@ -31,7 +31,6 @@ import { getSampleState } from "./sample";
 import { scheduleAutosave } from "./persist";
 
 const MAX_GRAPH_HISTORY = 75;
-const INSPECTOR_HISTORY_DEBOUNCE_MS = 280;
 
 type GraphSnapshot = { nodes: DesignNode[]; edges: DesignEdge[] };
 
@@ -44,17 +43,6 @@ let graphHistoryDepth = 0;
  * skip the final `dragging:false` batch (positions are already applied during drag).
  */
 let nodePositionDragSession = false;
-
-let inspectorCoalesceKey: string | null = null;
-let inspectorCoalesceTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleInspectorCoalesceEnd() {
-  if (inspectorCoalesceTimer) clearTimeout(inspectorCoalesceTimer);
-  inspectorCoalesceTimer = setTimeout(() => {
-    inspectorCoalesceTimer = null;
-    inspectorCoalesceKey = null;
-  }, INSPECTOR_HISTORY_DEBOUNCE_MS);
-}
 
 function cloneGraphSnapshot(nodes: DesignNode[], edges: DesignEdge[]): GraphSnapshot {
   return structuredClone({ nodes, edges });
@@ -373,23 +361,15 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
 
   updateNodeData: (id, partial) =>
     set((s) => {
-      let graphPast = s.graphPast;
-      let graphFuture = s.graphFuture;
-      if (graphHistoryDepth === 0) {
-        const key = `n:${id}`;
-        if (inspectorCoalesceKey !== key) {
-          resetNodePositionDragSession();
-          graphPast = [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
-            -MAX_GRAPH_HISTORY,
-          );
-          graphFuture = [];
-          inspectorCoalesceKey = key;
-        }
-        scheduleInspectorCoalesceEnd();
-      }
+      const record = graphHistoryDepth === 0;
+      if (record) resetNodePositionDragSession();
       return {
-        graphPast,
-        graphFuture,
+        graphPast: record
+          ? [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+              -MAX_GRAPH_HISTORY,
+            )
+          : s.graphPast,
+        graphFuture: record ? [] : s.graphFuture,
         nodes: s.nodes.map((n) => {
           if (n.id !== id) return n;
           const merged: DesignNodeData = { ...n.data, ...partial };
@@ -403,23 +383,15 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
 
   updateEdgeData: (id, partial) =>
     set((s) => {
-      let graphPast = s.graphPast;
-      let graphFuture = s.graphFuture;
-      if (graphHistoryDepth === 0) {
-        const key = `e:${id}`;
-        if (inspectorCoalesceKey !== key) {
-          resetNodePositionDragSession();
-          graphPast = [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
-            -MAX_GRAPH_HISTORY,
-          );
-          graphFuture = [];
-          inspectorCoalesceKey = key;
-        }
-        scheduleInspectorCoalesceEnd();
-      }
+      const record = graphHistoryDepth === 0;
+      if (record) resetNodePositionDragSession();
       return {
-        graphPast,
-        graphFuture,
+        graphPast: record
+          ? [...s.graphPast, cloneGraphSnapshot(s.nodes, s.edges)].slice(
+              -MAX_GRAPH_HISTORY,
+            )
+          : s.graphPast,
+        graphFuture: record ? [] : s.graphFuture,
         edges: s.edges.map((e) =>
           e.id === id
             ? {
