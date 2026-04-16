@@ -83,6 +83,28 @@ function pointInRect(
   );
 }
 
+/** Skip diagram undo/redo so native text undo works in the inspector. */
+function isEditableTextTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const el = target.closest("input, textarea, select");
+  if (!el) return false;
+  if (el instanceof HTMLInputElement) {
+    const t = el.type;
+    if (t === "button" || t === "submit" || t === "reset" || t === "file") {
+      return false;
+    }
+    return !el.readOnly && !el.disabled;
+  }
+  if (el instanceof HTMLTextAreaElement) {
+    return !el.readOnly && !el.disabled;
+  }
+  if (el instanceof HTMLSelectElement) {
+    return !el.disabled;
+  }
+  return false;
+}
+
 function SelectionBridge() {
   const setSelection = useDesignStore((s) => s.setSelection);
   useOnSelectionChange({
@@ -156,8 +178,32 @@ function CanvasToolbar({
   const rf = useReactFlow();
   const nodeCount = useDesignStore((s) => s.nodes.length);
   const autoLayoutCanvas = useDesignStore((s) => s.autoLayoutCanvas);
+  const canUndo = useDesignStore((s) => s.graphPast.length > 0);
+  const canRedo = useDesignStore((s) => s.graphFuture.length > 0);
+  const undoGraph = useDesignStore((s) => s.undoGraph);
+  const redoGraph = useDesignStore((s) => s.redoGraph);
+  const btnClass =
+    "rounded-md border border-black/15 bg-[var(--background)] px-2 py-1 text-xs font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/15";
   return (
     <Panel position="top-right" className="flex gap-2">
+      <button
+        type="button"
+        onClick={() => undoGraph()}
+        disabled={!canUndo}
+        className={btnClass}
+        aria-label="Undo last diagram change. Shortcuts: Ctrl+Z or Command+Z."
+      >
+        Undo
+      </button>
+      <button
+        type="button"
+        onClick={() => redoGraph()}
+        disabled={!canRedo}
+        className={btnClass}
+        aria-label="Redo diagram change. Shortcuts: Ctrl+Y, Ctrl+Shift+Z, Command+Shift+Z, or Command+Y."
+      >
+        Redo
+      </button>
       <button
         type="button"
         aria-pressed={canvasLocked}
@@ -179,7 +225,7 @@ function CanvasToolbar({
         type="button"
         onClick={() => autoLayoutCanvas()}
         disabled={nodeCount === 0}
-        className="rounded-md border border-black/15 bg-[var(--background)] px-2 py-1 text-xs font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/15"
+        className={btnClass}
         aria-label="Tidy layout: auto-arrange all nodes"
       >
         Tidy layout
@@ -187,7 +233,7 @@ function CanvasToolbar({
       <button
         type="button"
         onClick={() => rf.fitView({ padding: 0.2 })}
-        className="rounded-md border border-black/15 bg-[var(--background)] px-2 py-1 text-xs font-medium shadow-sm dark:border-white/15"
+        className={btnClass}
       >
         Fit view
       </button>
@@ -222,6 +268,31 @@ export function FlowCanvas() {
   const onConnect = useDesignStore((s) => s.onConnect);
   const addNodeAt = useDesignStore((s) => s.addNodeAt);
   const removeNodesById = useDesignStore((s) => s.removeNodesById);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      if (isEditableTextTarget(e.target)) return;
+      const key = e.key.toLowerCase();
+      const state = useDesignStore.getState();
+      if (key === "z" && !e.shiftKey) {
+        if (state.graphPast.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        state.undoGraph();
+        return;
+      }
+      if (key === "y" || (key === "z" && e.shiftKey)) {
+        if (state.graphFuture.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        state.redoGraph();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const trashRef = useRef<HTMLDivElement>(null);
   const [trashHot, setTrashHot] = useState(false);
