@@ -283,17 +283,7 @@ export const useDesignStore = create<DesignStore>((set, get) => ({
   },
 
   loadSample: () => {
-    const sample = getSampleState();
-    set((s) => ({
-      nodes: coerceNodes(sample.nodes),
-      edges: sample.edges,
-      globalRps: sample.sim.globalRps,
-      simRunning: false,
-      selection: { nodeId: null, edgeId: null },
-      metrics: defaultMetrics(),
-      transientSim: emptyTransientSimState(),
-      fitViewNonce: s.fitViewNonce + 1,
-    }));
+    get().hydrateFromImport(getSampleState());
   },
 
   clearCanvas: () =>
