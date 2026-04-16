@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useReactFlow } from "@xyflow/react";
+import { toPng, toSvg } from "html-to-image";
 import type { NodeKind } from "@/lib/design/types";
 import { normalizePersistedState } from "@/lib/design/types";
 import {
@@ -29,6 +31,48 @@ export function SimulationBlock() {
   const exportPersisted = useDesignStore((s) => s.exportPersisted);
   const hydrateFromImport = useDesignStore((s) => s.hydrateFromImport);
   const fileRef = useRef<HTMLInputElement>(null);
+  const rf = useReactFlow();
+
+  const downloadDiagram = useCallback(
+    async (kind: "png" | "svg") => {
+      if (nodes.length === 0) return;
+      const bg =
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--background")
+          .trim() || "#ffffff";
+      try {
+        rf.fitView({ padding: 0.18 });
+        await new Promise<void>((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => r())),
+        );
+        const el = document.querySelector(
+          ".react-flow__viewport",
+        ) as HTMLElement | null;
+        if (!el) {
+          window.alert("Could not find the diagram viewport.");
+          return;
+        }
+        const dataUrl =
+          kind === "png"
+            ? await toPng(el, {
+                pixelRatio: 2,
+                backgroundColor: bg,
+                cacheBust: true,
+              })
+            : await toSvg(el, { backgroundColor: bg, cacheBust: true });
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download =
+          kind === "png"
+            ? "system-design-diagram.png"
+            : "system-design-diagram.svg";
+        a.click();
+      } catch {
+        window.alert("Could not export the diagram image.");
+      }
+    },
+    [nodes.length, rf],
+  );
 
   const [rpsDraft, setRpsDraft] = useState(String(globalRps));
 
@@ -288,6 +332,32 @@ export function SimulationBlock() {
             className="hidden"
             onChange={onImportFile}
           />
+        </div>
+        <div className="space-y-2 border-t border-black/10 pt-2 dark:border-white/10">
+          <h4 className="text-xs font-semibold text-black/70 dark:text-white/60">
+            Image
+          </h4>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={nodes.length === 0}
+              onClick={() => void downloadDiagram("png")}
+              className="rounded-md border border-black/15 px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/15"
+            >
+              Download PNG
+            </button>
+            <button
+              type="button"
+              disabled={nodes.length === 0}
+              onClick={() => void downloadDiagram("svg")}
+              className="rounded-md border border-black/15 px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/15"
+            >
+              Download SVG
+            </button>
+          </div>
+          <p className="text-[11px] leading-relaxed text-black/50 dark:text-white/45">
+            Fits the diagram to the view, then saves (good for slides).
+          </p>
         </div>
         <p className="text-[11px] leading-relaxed text-black/50 dark:text-white/45">
           Diagrams autosave in this browser. Export to share or back up.
