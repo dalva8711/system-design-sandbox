@@ -6,6 +6,7 @@ import { ComponentPalette } from "@/components/design/ComponentPalette";
 import { FlowCanvas } from "@/components/design/FlowCanvas";
 import { InspectorPanel } from "@/components/design/InspectorPanel";
 import { SimulationBlock } from "@/components/design/SimulationBlock";
+import { WelcomeModal } from "@/components/design/WelcomeModal";
 import { loadPersisted } from "@/lib/design/persist";
 import { DESIGN_TEMPLATES } from "@/lib/design/templates";
 import {
@@ -49,6 +50,7 @@ export function DesignSandbox() {
 
   return (
     <ReactFlowProvider>
+      <WelcomeModal />
       <div className="flex h-[calc(100vh-1px)] min-h-[640px] flex-col bg-[var(--background)] text-[var(--foreground)]">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 px-4 py-3 dark:border-white/10">
           <div>

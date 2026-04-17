@@ -28,7 +28,9 @@ function NodeInspectorSection({
   const [labelDraft, setLabelDraft] = useState(d.label);
 
   useEffect(() => {
-    setLabelDraft(d.label);
+    queueMicrotask(() => {
+      setLabelDraft(d.label);
+    });
   }, [nid, d.label]);
 
   const commitLabel = useCallback(() => {
